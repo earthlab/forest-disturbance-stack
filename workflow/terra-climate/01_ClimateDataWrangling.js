@@ -8,6 +8,8 @@
 // The script outputs two image collections: one for monthly averages (one image per variable), and the other for min/max/months (one image per year).
 // The image collections are then output as a series named geotiffs to a folder in the user's google drive.
 
+//'neondomains' shapefile table is the NEON 'Domain Polygons' from: https://www.neonscience.org/data-samples/data/spatial-data-maps
+
 // DIRECT LINK TO GEE SCRIPT: https://code.earthengine.google.com/?scriptPath=users%2Ftymc5571%2FCompoundDisturbance%3AClimate_DisturbanceStack
 
 //////////// DATA
@@ -15,19 +17,6 @@
 //Data imports copied from GEE
 var terraclimate = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE"),
     neondomains = ee.FeatureCollection("users/tymc5571/NEON_Domains");
-
-
-
-// Climate Disturbance Stack Analysis: Step 1, data wrangling
-// Tyler McIntosh, CU Boulder Earth Lab, 9/9/2022
-
-// This script takes in the TerraClimate dataset, as well as a domain of interest to which results will be clipped to.
-// Datasets are wrangled in such a way as to enable future analysis as outlined by
-// Hammond et al. 2022, which requires monthly averages for each variable of interest over the entire timeframe
-// as well as the minimum/maximum of each variable in a given year, at a given location, in addition to the month in which that max/min occurred.
-// The script outputs two image collections: one for monthly averages (one image per variable), and the other for min/max/months (one image per year).
-// The image collections are then output as a series named geotiffs to a folder in the user's google drive.
-
 
 //////////// SETUP
 
@@ -61,6 +50,7 @@ var getmonthmean = function(month) {
   var means = vars.filter(ee.Filter.calendarRange(month,month,'month')).mean();
   means = means.rename(['tmmx_mean', 'vpd_mean', 'def_mean', 'soil_mean', 'pr_mean', 'pdsi_mean']);
   means = means.set('month', ee.Number(month).toInt());
+  means = means.set('monthclean', ee.Number(month).toInt().format('%02d'));
   return means.clip(domain);
 };
 
@@ -185,7 +175,7 @@ Map.addLayer(allvariables.filter(ee.Filter.eq('year', 1958)).select('tmmx_month'
 var batch = require('users/fitoprincipe/geetools:batch');
 batch.Download.ImageCollection.toDrive(monthmeans, foldername,
   {region: domain,
-  name: 'MonthlyMeans_Month{month}',
+  name: 'MonthlyMeans_Month{monthclean}',
   scale: 4638.3
   });
 
