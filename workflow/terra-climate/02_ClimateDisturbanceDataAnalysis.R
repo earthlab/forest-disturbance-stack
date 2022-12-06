@@ -51,9 +51,6 @@ here() #Check here location
 #Get file names of severity data
 monthFileNames <- list.files(path = here("data", "climate", "GEE_terraclimate_prewrangled"), 
                                pattern ="MonthlyMeans*", full.names = TRUE)
-#MISTAKE MADE IN GEE SCRIPT: MONTHS ARE (1, 2, ...12) RATHER THAN (01, 02, ... 12) IN FILENAMES
-#FIX ORDER OF FILES
-
 
 yearVarFileNames <- list.files(path = here("data", "climate", "GEE_terraclimate_prewrangled"), 
                                pattern ="AllVariables*", full.names = TRUE)
@@ -71,8 +68,6 @@ compareGeom(monthMeans$January, yearVarData$`1958`)
 
 
 ################ CALCULATE ANOMALY ###############
-
-#calculate anomaly for one year first, test method. Then apply over entire list
 
 #Function to calculate anomalies when provided with a single raster from yearVarData (data for one year)
 calc.year.anomalies <- function(year) {
@@ -103,174 +98,100 @@ calc.year.anomalies <- function(year) {
 anomalies <- lapply(yearVarData, calc.year.anomalies) %>% sds()
 names(anomalies) <- as.character(seq(1958, 2021))
 
+#Load output anomaly geotiffs
+anomalies <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
+                            pattern ="*anomalies.tif", full.names = TRUE))
+names(anomalies) <- as.character(seq(1958, 2021))
+
+
 
 ############## STANDARDIZE ANOMALIES ################
 
-#Create empty vectors
-allPrAnom <- c()
-allPdsiAnom <- c()
-allSoilAnom <- c()
-allTmmxAnom <- c()
-allVpdAnom <- c()
-allDefAnom <- c()
+#Calculate standardized z-score = ((value - set_mean) / set_standard_deviation)
 
-#Collate all values for each variable across all years
-for (i in 1:length(anomalies)) {
-  allPrAnom <- append(allPrAnom, values(anomalies[i]$pr_anom, na.rm=TRUE))
-  allPdsiAnom <- append(allPdsiAnom, values(anomalies[i]$pdsi_anom, na.rm=TRUE))
-  allSoilAnom <- append(allSoilAnom, values(anomalies[i]$soil_anom, na.rm=TRUE))
-  allTmmxAnom <- append(allTmmxAnom, values(anomalies[i]$tmmx_anom, na.rm=TRUE))
-  allVpdAnom <- append(allVpdAnom, values(anomalies[i]$vpd_anom, na.rm=TRUE))
-  allDefAnom <- append(allDefAnom, values(anomalies[i]$def_anom, na.rm=TRUE))
+set.seed(0)
+r <- rast(nrows=10, ncols=10, nlyrs=3)
+values(r) <- runif(ncell(r) * nlyr(r))
+values(r) <- rep(1:3, each = ncell(r))
+plot(r)
+x <- mean(r)
+plot(x)
+# note how this returns one layer
+x <- sum(c(r[[1]], r[[2]]), 5)
+plot(x)
+# and this returns three layers
+y <- sum(r, r[[2]], 5)
+plot(y)
+
+anomalies$`1958`$pr_anom
+
+length(anomalies)
+
+compiled <- anomalies$`1958`$pr_anom
+for (yr in 2:length(anomalies)) {
+  year <- anomalies[yr]
+  compiled <- sds(compiled, year$pr_anom)
 }
 
-#Calculate overarching means & standard deviations for each variable, to use when calculating z-scores
-anomAvgs <- c(mean(allPrAnom), mean(allPdsiAnom), mean(allSoilAnom), mean(allTmmxAnom), mean(allVpdAnom), mean(allDefAnom))
-names(anomAvgs) <- c('pr', 'pdsi', 'soil', 'tmmx', 'vpd', 'def')
-anomSds <- c(sd(allPrAnom), sd(allPdsiAnom), sd(allSoilAnom), sd(allTmmxAnom), sd(allVpdAnom), sd(allDefAnom))
-names(anomSds) <- c('pr', 'pdsi', 'soil', 'tmmx', 'vpd', 'def')
 
-
-#Standardize values in each raster to z-scores based on overarching means & standard deviations
-standardize.anomalies <- function(year) {
-  for (i in 1:length(names(year))) { #FOR each variable we have calculated anomalies for
-    year[[i]] <- ((year[[i]] - anomAvgs[i]) / anomSds[i]) #Calculate standardized z-score = ((value - set_mean) / set_standard_deviation)
+#Function to get the mean and sd of a set of years each containing one variable
+get.mean.sd <- function(allyr) {
+  for (i in 1:length(allyr)) {
+    yr <- as.character(seq(1958, 2021))[i]
+    names(allyr[[i]]) <- yr
   }
-  return(year)
-  # year$pr_anom <- (year$pr_anom - anomAvgs['pr']) / anomSds['pr']
-  # year$pdsi_anom <- (year$pdsi_anom - anomAvgs[2]) / anomSds['pdsi']
-  # year$soil_anom <- (year$soil_anom - anomAvgs[3]) / anomSds['soil']
-  # year$tmmx_anom <- (year$tmmx_anom - anomAvgs[4]) / anomSds['tmmx']
-  # year$vpd_anom <- (year$vpd_anom - anomAvgs[5]) / anomSds['vpd']
-  # year$def_anom <- (year$def_anom - anomAvgs[6]) / anomSds['def']
+  allyr <- rast(allyr)
+  mean <- mean(allyr)
+  names(mean) <- "mean"
+  sd <- stdev(allyr)
+  names(sd) <- "sd"
+  return(rast(c(mean, sd)))
 }
 
-#Apply standardiation function to all years
-anomaliesStandard <- lapply(anomalies, standardize.anomalies) %>% sds()
-names(anomaliesStandard) <- as.character(seq(1958, 2021))
+precip <- map(as.list(anomalies), ~.x$pr_anom) %>% get.mean.sd(pr_anom)
 
+
+
+
+# allPr <- map(as.list(anomalies), ~.x$pr_anom) #Here we have to turn anomalies back into a list in order to map over it and select the bands by variable name
+# for (i in 1:length(allPr)) {
+#   yr <- as.character(seq(1958, 2021))[i]
+#   names(test[[i]]) <- yr
+# }
+# allV <- rast(test)
+# mean <- mean(allV)
+# names(mean) <- "mean"
+# sd <- stdev(allV)
+# names(sd) <- "sd"
+# r <- rast(c(mean, sd))
+
+
+
+###################### WRITE ALL OUTPUTS ##################
 
 #Write all rasters as geotiffs
 for (i in  1:length(names(anomalies))) {
   writeRaster(anomalies[i], here("data", "climate", "anomaly_outputs", 
                                  paste(names(anomalies)[i], '_anomalies.tif', sep="")))
-  writeRaster(anomaliesStandard[i], here("data", "climate", "anomaly_outputs", 
-                                         paste(names(anomaliesStandard)[i], '_anomalies_Standard.tif', sep="")))
+  # writeRaster(anomaliesStandard[i], here("data", "climate", "anomaly_outputs", 
+  #                                        paste(names(anomaliesStandard)[i], '_anomalies_Standard.tif', sep="")))
 }
 
-#Load output geotiffs if starting from new load
-anomalies <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
-                            pattern ="*anomalies.tif", full.names = TRUE))
-names(anomalies) <- as.character(seq(1958, 2021))
-
-anomaliesStandard <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
-                            pattern ="*Standard.tif", full.names = TRUE))
-names(anomaliesStandard) <- as.character(seq(1958, 2021))
-
-
-
-
-
-
-
-
-
-################# DEBUGGING SPACE ##############
-
-
-##########CHECK MONTH AVG DATA IS GOOD
-monthFileNames
-
-#Location points used in GEE, put into 2-column matrix form as required by terra::extract
-wypt <- t(as.matrix(c(-110.786763, 43.432451)))
-copt <- t(as.matrix(c(-105.24249040058604,40.00981039217258)))
-capt <- t(as.matrix(c(-122.170020, 37.428193)))
-wapt <- t(as.matrix(c(-122.486757, 48.733972)))
-
-#Function to extract data from monthly avgs
-extract.monthavgs.to.point <- function(pt) {
-  anoms <- monthMeans %>% 
-    lapply(extract, pt, method = "simple") %>%
-    bind_rows() %>% 
-    cbind(1:12) %>% 
-    rename(month = `1:12`)
-  return(anoms)
-}
-
-#Run function for all points
-wy_test <- wypt %>% extract.monthavgs.to.point()
-co_test <- copt %>% extract.monthavgs.to.point()
-ca_test <- capt %>% extract.monthavgs.to.point()
-wa_test <- wapt %>% extract.monthavgs.to.point()
-
-##########CHECK YEAR MIN/MAX/MONTH AVG DATA IS GOOD
-
-#Function to extract data from full dataset anomalies
-extract.yearvardata.to.point <- function(pt) {
-  anoms <- yearVarData %>% 
-    lapply(extract, pt, method = "simple") %>%
-    bind_rows() %>% 
-    cbind(1958:2021) %>% 
-    rename(year = `1958:2021`)
-  return(anoms)
-}
-
-wy_test <- wypt %>% extract.yearvardata.to.point()
-co_test <- copt %>% extract.yearvardata.to.point() ##### CO_test here is full of NANs?!?!
-ca_test <- capt %>% extract.yearvardata.to.point()
-wa_test <- wapt %>% extract.yearvardata.to.point()
-
-plot(yearVarData$`1958`$pr_min)
-points(copt)
-points(wypt)
-points(capt)
-points(wapt)
-
-plot(monthMeans$January$tmmx_mean)
-points(copt)
-points(wypt)
-points(capt)
-points(wapt)
-
-###################
-
+print("RASTERS WRITTEN")
 # 
-# print(end$`1958`$pr_anom)
-# print(endStandard$`1958`$pr_anom)
+# #Load output geotiffs if starting from new load
+# anomalies <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
+#                             pattern ="*anomalies.tif", full.names = TRUE))
+# names(anomalies) <- as.character(seq(1958, 2021))
 # 
-# 
-# plot(end$`1958`$pdsi_anom)
-# plot(endStandard$`1958`$pdsi_anom)
-# 
+# anomaliesStandard <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
+#                             pattern ="*Standard.tif", full.names = TRUE))
+# names(anomaliesStandard) <- as.character(seq(1958, 2021))
 
 
-####################
-# #Test rasters
-# precip <- rast(nrows=2, ncols=2, xmin=0, xmax=2, ymin=0, ymax=2)
-# values(precip) <- c(3,6,2,9)
-# plot(precip)
-# pmonth <- rast(nrows=2, ncols=2, xmin=0, xmax=2, ymin=0, ymax=2)
-# values(pmonth) <- c(1,2,2,1)
-# plot(pmonth)
-# v <- sds(precip, pmonth)
-# names(v) <- c('p', 'pm')
-# 
-# m1av <- rast(nrows=2, ncols=2, xmin=0, xmax=2, ymin=0, ymax=2)
-# values(m1av) <- c(2, 3, 3, 2)
-# plot(m1av)
-# m2av <- rast(nrows=2, ncols=2, xmin=0, xmax=2, ymin=0, ymax=2)
-# values(m2av) <- c(20, 30, 30, 20)
-# plot(m2av)
-# av <- sds(m1av, m2av)
-# names(av) <- c('j', 'f')
-# 
-# test <- rast(nrows=dim(m1av)[1], ncols = dim(m1av)[2])
-# ext(test) <- ext(m1av)
-# for (month in 1:2) {
-#   test <- ifel(v$pm == month, v$p - av[month], test)
-# }
-# 
-# plot(test)
+
+
+
 
 
 

@@ -46,10 +46,10 @@ here() #Check here location
 anomalies <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
                             pattern ="*anomalies.tif", full.names = TRUE))
 names(anomalies) <- as.character(seq(1958, 2021))
-
-anomaliesStandard <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
-                                    pattern ="*Standard.tif", full.names = TRUE))
-names(anomaliesStandard) <- as.character(seq(1958, 2021))
+# 
+# anomaliesStandard <- sds(list.files(path = here("data", "climate", "anomaly_outputs"), 
+#                                     pattern ="*Standard.tif", full.names = TRUE))
+# names(anomaliesStandard) <- as.character(seq(1958, 2021))
 
 
 #Load CSV of testing data & perform preparatory manipulations
@@ -61,9 +61,12 @@ rawPtData <- rawPtData %>%
   mutate(month = substr(yearmonth, 5, 6))
 glimpse(rawPtData)
 
+
+################ PERFORM CSV ANALYSIS TO CHECK GEOTIFFS AGAINST #################
+
 #Location points used in GEE, put into 2-column matrix form as required by terra::extract
 wypt <- t(as.matrix(c(-110.786763, 43.432451)))
-copt <- t(as.matrix(c(-105.24249040058604,40.00981039217258)))
+copt <- t(as.matrix(c(-105.242490, 40.009810)))
 capt <- t(as.matrix(c(-122.170020, 37.428193)))
 wapt <- t(as.matrix(c(-122.486757, 48.733972)))
 
@@ -126,6 +129,7 @@ add.anomaly <- function(dats, monthAvgs, varNm, varNmAvg) {
 }
 
 #Function to calculate anomalies and bind them all together
+#Uses fx add.anomaly
 get.all.anomalies <- function(dats) {
   #Averages
   avgs <- calc.month.avgs(dats)
@@ -140,14 +144,14 @@ get.all.anomalies <- function(dats) {
   
   #Negative variables
   soil_anom <- add.anomaly(min.month(dats, soil), avgs, soil, soilavg) %>% 
-    rename(soil_anom = anomaly) %>% 
-    mutate(soil_anom = soil_anom * -1)
+    rename(soil_anom = anomaly) #%>% 
+  #  mutate(soil_anom = soil_anom * -1)
   pr_anom <- add.anomaly(min.month(dats, pr), avgs, pr, pravg) %>% 
-    rename(pr_anom = anomaly) %>% 
-    mutate(pr_anom = pr_anom * -1)
+    rename(pr_anom = anomaly) #%>% 
+  #  mutate(pr_anom = pr_anom * -1)
   pdsi_anom <- add.anomaly(min.month(dats, pdsi), avgs, pdsi, pdsiavg) %>% 
-    rename(pdsi_anom = anomaly) %>% 
-    mutate(pdsi_anom = pdsi_anom * -1)
+    rename(pdsi_anom = anomaly) #%>% 
+  #  mutate(pdsi_anom = pdsi_anom * -1)
   
   #Join all on year column
   anoms <- tmmx_anom %>%
@@ -159,20 +163,16 @@ get.all.anomalies <- function(dats) {
 }
 
 #For testing purposes
-wy_avgs <- calc.month.avgs(wy)
-ca_avgs <- calc.month.avgs(ca)
-co_avgs <- calc.month.avgs(co)
-wa_avgs <- calc.month.avgs(wa)
-co_pr_mmm <- min.month(co, pr)
-
-tmmx_wy_anom <- add.anomaly(max.month(wy, tmmx), wy_avgs, tmmx, tmmxavg)
-soil_wy_anom <- add.anomaly(min.month(wy, soil), wy_avgs, soil, soilavg)
+wyCsvAvgs <- calc.month.avgs(wy)
+caCsvAvgs <- calc.month.avgs(ca)
+coCsvAvgs <- calc.month.avgs(co)
+waCsvAvgs <- calc.month.avgs(wa)
 
 #Run for all locations
-wy_all <- get.all.anomalies(wy)
-co_all <- get.all.anomalies(co)
-ca_all <- get.all.anomalies(ca)
-wa_all <- get.all.anomalies(wa)
+wyCsvAnoms <- get.all.anomalies(wy)
+coCsvAnoms <- get.all.anomalies(co)
+caCsvAnoms <- get.all.anomalies(ca)
+waCsvAnoms <- get.all.anomalies(wa)
 
 #Extract data from full dataset anomalies
 plot(anomalies$`1958`$tmmx_anom)
@@ -180,6 +180,7 @@ points(wypt)
 points(capt)
 points(copt)
 points(wapt)
+
 
 #Function to extract data from full dataset anomalies
 extract.anomalies.to.point <- function(pt) {
@@ -192,23 +193,140 @@ extract.anomalies.to.point <- function(pt) {
 }
 
 #Run function for all points
-wy_test <- wypt %>% extract.anomalies.to.point()
-co_test <- copt %>% extract.anomalies.to.point()
-ca_test <- capt %>% extract.anomalies.to.point()
-wa_test <- wapt %>% extract.anomalies.to.point()
+wyGeotAnoms <- wypt %>% extract.anomalies.to.point()
+coGeotAnoms <- copt %>% extract.anomalies.to.point()
+caGeotAnoms <- capt %>% extract.anomalies.to.point()
+waGeotAnoms <- wapt %>% extract.anomalies.to.point()
+
+
+############### COMPARE ANOMALIES ###############
+
+#Function to test anomalies from both analyses
+test.comparison.at.point <- function(csvpt, geotpt) {
+  print(paste("TMMX compare: ", sum(csvpt$tmmx_anom == geotpt$tmmx_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$tmmx_anom == geotpt$tmmx_anom)
+  print(paste("VPD compare: ", sum(csvpt$vpd_anom == geotpt$vpd_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$vpd_anom == geotpt$vpd_anom)
+  print(paste("DEF compare: ", sum(csvpt$def_anom == geotpt$def_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$def_anom == geotpt$def_anom)
+  print(paste("SOIL compare: ", sum(csvpt$soil_anom == geotpt$soil_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$soil_anom == geotpt$soil_anom)
+  print(paste("PR compare: ", sum(csvpt$pr_anom == geotpt$pr_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$pr_anom == geotpt$pr_anom)
+  print(paste("PDSI compare: ", sum(csvpt$pdsi_anom == geotpt$pdsi_anom), " True of ", length(csvpt$year), sep=""))
+  print(csvpt$pdsi_anom == geotpt$pdsi_anom)
+}
+
+#Run for each site - TAKEAWAY: CO = NA issue, others show that there are the multiple-month min/max issue
+test.comparison.at.point(wyCsvAnoms, wyGeotAnoms) #Soil many false
+soilWy <- min.month(wy, soil) #due to 'what happens when there are equal min/max' issue - notice multiple entries for each year
+view(soilWy)
+#How big are the anomaly differences caused by the month min/max issue?
+examineWySoil <- cbind(1958:2021, wyCsvAnoms$soil_anom, wyGeotAnoms$soil_anom) %>% 
+  as.tibble() %>% 
+  rename("Year" = V1, "ManualWCorrection" = V2, "FromGeotiffsNoCorrection" = V3)
+view(examineWySoil) #Actually fairly large. The CSV data (corrected for maximum anomaly) does have significantly higher anomalies
+
+test.comparison.at.point(waCsvAnoms, waGeotAnoms)
+
+test.comparison.at.point(caCsvAnoms, caGeotAnoms) #PR many false
+prCa <- min.month(ca, pr) #due to 'what happens when there are equal min/max' issue - notice multiple entries for each year
+view(prCa)
+#How big are the anomaly differences caused by the month min/max issue?
+
+
+test.comparison.at.point(coCsvAnoms, coGeotAnoms) #coGeoTAnoms is full of NAs!
+
+#Check that point is over what has been exported for use
+plot(anomalies$`1958`$tmmx_anom, xlim=c(-105.2, -105.5), ylim=c(39.9, 40.1))
+points(copt) #Appears so
+extract(anomalies$`1958`$tmmx_anom, copt)
+
+leaflet() %>% addTiles() %>% addRasterImage(anomalies$`1958`$tmmx_anom) %>% addMarkers(copt)
+
+
+
+################ PERFORM GEOTIFF ANALYSIS TO CHECK STEPS #################
+
+
+##########CHECK MONTH AVG DATA IS GOOD
+monthFileNames <- list.files(path = here("data", "climate", "GEE_terraclimate_prewrangled"),
+                             pattern ="MonthlyMeans*", full.names = TRUE)
+monthFileNames #The order was wrong before, correct now
+
+#Create SpatRasterDataset of monthly rasters
+monthMeans <- sds(monthFileNames) #Can load list of file names directly to spatrasterdataset
+names(monthMeans) <- month.name
+
+#Function to extract data from monthly avgs
+extract.monthavgs.to.point <- function(pt) {
+  loc <- monthMeans %>%
+    lapply(extract, pt, method = "simple") %>%
+    bind_rows() %>%
+    cbind(1:12) %>%
+    rename(month = `1:12`)
+  return(loc)
+}
+
+#Run function for all points
+wyGeotAvgs <- wypt %>% extract.monthavgs.to.point()
+coGeotAvgs <- copt %>% extract.monthavgs.to.point() ##### CO here is full of NANs
+caGeotAvgs <- capt %>% extract.monthavgs.to.point()
+waGeotAvgs <- wapt %>% extract.monthavgs.to.point()
+
+
+##########CHECK YEAR MIN/MAX/MONTH AVG DATA IS GOOD
+yearVarFileNames <- list.files(path = here("data", "climate", "GEE_terraclimate_prewrangled"),
+                               pattern ="AllVariables*", full.names = TRUE)
+#Create SpatRasterDataset of yearly variable rasters
+yearVarData <- sds(yearVarFileNames)
+names(yearVarData) <- as.character(seq(1958, 2021))
+
+#Function to extract data from full dataset anomalies
+extract.yearvardata.to.point <- function(pt) {
+  anoms <- yearVarData %>%
+    lapply(extract, pt, method = "simple") %>%
+    bind_rows() %>%
+    cbind(1958:2021) %>%
+    rename(year = `1958:2021`)
+  return(anoms)
+}
+
+wyGeotRaw <- wypt %>% extract.yearvardata.to.point()
+coGeotRaw <- copt %>% extract.yearvardata.to.point() ##### CO here is full of NANs?!?!
+caGeotRaw <- capt %>% extract.yearvardata.to.point()
+waGeotRaw <- wapt %>% extract.yearvardata.to.point()
 
 
 
 
+#Examine the min/max month issue
+view(soilWy)
+view(wyGeotRaw)
+view(examineWySoil)
+#It appears that the GEE min/max reducers are pulling whichever month is numerically first
+#Would need to fix this in GEE, or pull raw TerraClimate with R...
 
 
 
+#Plot anomaly changes 
+precipCa <- min.month(ca, pr) #due to 'what happens when there are equal min/max' issue - notice multiple entries for each year
 
+examineCaPr <- cbind(1958:2021, caCsvAnoms$pr_anom, caGeotAnoms$pr_anom) %>% 
+  as.tibble() %>% 
+  rename("Year" = V1, "SelectHighAnom" = V2, "AutoSelect" = V3)
 
+#Create tidy dataset
+tidyCaPr <- examineCaPr %>% pivot_longer(
+                                          cols = c(SelectHighAnom, AutoSelect),
+                                          names_to = "Type",
+                                          values_to = "Anomaly"
+                                          )
+#Plot
+ggplot(tidyCaPr) + 
+  aes(x = Year, y = Anomaly, fill=Type) +
+  geom_col(position = "dodge") + 
+  labs(title = "Impact of multi-month max/min treatment in anomaly calculations")
+ggsave(filename = "multi_month_minmax_anomalies.jpeg", path = here("figs"))
 
-
-
-
-
-
-
+write.csv(precipCa, file = here("data", "climate", "CA_Precip_Mins.csv"))
