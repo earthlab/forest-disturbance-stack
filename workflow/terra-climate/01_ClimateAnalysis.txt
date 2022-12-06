@@ -5,16 +5,23 @@
 // Climate Disturbance Stack Analysis: Hotter-hot fingerprint climate analysis
 // Tyler McIntosh, CU Boulder Earth Lab, 10/21/2022
 
-// This script takes in the TerraClimate dataset, as well as a domain of interest to which results will be clipped to.
-// Datasets are wrangled in such a way as to enable future analysis as outlined by
-// Hammond et al. 2022, which requires monthly averages for each variable of interest over the entire timeframe
-// as well as the minimum/maximum of each variable in a given year, at a given location, in addition to the month in which that max/min occurred.
-// The script outputs two image collections: one for monthly averages (one image per variable), and the other for min/max/months (one image per year).
-// The image collections are then output as a series named geotiffs to a folder in the user's google drive.
+// This script takes in the TerraClimate dataset, and performs calculations on the full dataset to produce
+// rasters of annual 'hotter-hot drought'. These calculations are the same as those made for point-locations in Hammond et al 2022: https://www.nature.com/articles/s41467-022-29289-2.
 
-//'neondomains' shapefile table is the NEON 'Domain Polygons' from: https://www.neonscience.org/data-samples/data/spatial-data-maps
+// 'neondomains' shapefile table is the NEON 'Domain Polygons' from: https://www.neonscience.org/data-samples/data/spatial-data-maps
 
 // DIRECT LINK TO GEE SCRIPT: https://code.earthengine.google.com/?scriptPath=users%2Ftymc5571%2FCompoundDisturbance%3AClimate_DisturbanceStack
+
+// OUTPUTS
+// The script outputs are final image collections: ICcleanFAvg, ICcleanFMax, and ICcleanFMin.
+// Each image within the image collection has a 'warmFingerprint' and 'coldFingerprint' band.
+// These are the clean fingerprints showing only those regions where more variables passed their thresholds than 'numVarThreshold'.
+// Avg, Min, and Max correspond to z-score thresholds set at the beginning of the script
+// The global values identified in Hammond et al 2022 are:
+// var warmDryTAvg = ee.List([0.37, 0.30, 0.49, -0.21, -0.39, -0.73]);
+// var warmDryTMax = ee.List([0.41, 0.34, 0.53, -0.24, -0.42, -0.77]);
+// var warmDryTMin = ee.List([0.33, 0.26, 0.45, -0.18, -0.36, -0.69]);
+
 
 //////////// DATA
 
@@ -62,6 +69,8 @@ print("Direction dictionary", direction_dictionary);
 var warmDryTAvg = ee.List([0.37, 0.30, 0.49, -0.21, -0.39, -0.73]);
 var warmDryTMax = ee.List([0.41, 0.34, 0.53, -0.24, -0.42, -0.77]);
 var warmDryTMin = ee.List([0.33, 0.26, 0.45, -0.18, -0.36, -0.69]);
+
+
 //Use opposite thresholds for cold/wet
 var flip = function(x) {return ee.Number(x).multiply(ee.Number(-1))};
 var coldWetTAvg = warmDryTAvg.map(flip);
@@ -69,7 +78,7 @@ var coldWetTMax = warmDryTMax.map(flip);
 var coldWetTMin = warmDryTMin.map(flip);
 
 //In order to create a binary output, we need to set a number of variables that must surpass the thresholds above
-var numVarThreshold = ee.Number(6);
+var numVarThreshold = ee.Number(4);
 
 //List of years of interest; will be mapped over. At time of writing, 2021 is most recent
 var years = ee.List.sequence(1958, 2021);
@@ -457,46 +466,75 @@ var fingerprintAvg = zippedAvgThresholdImages.map(make_fingerprint);
 var fingerprintMin = zippedMinThresholdImages.map(make_fingerprint);
 var fingerprintMax = zippedMaxThresholdImages.map(make_fingerprint);
 
-print('AVG FINGERPRINT?!', fingerprintAvg);
+print('A finished fingerprint', fingerprintAvg);
 
-//Map.addLayer(ee.Image(fingerprintMax.get(62)).select("warmFingerprint"), {min: 0, max: 6, palette:['blue', 'red']}, 'warmFingerprintMaxT', true);
+Map.addLayer(ee.Image(fingerprintMax.get(62)).select("warmFingerprint"), {min: 0, max: 6, palette:['blue', 'red']}, 'warmFingerprintMaxT', false);
 
-//Take the image bands that have 0 - 6 / 0 - -6 in them, and feed through binary filter
-var binaryFingerprint = function(yearImg) {
+
+//Take the image bands that have 0 - 6 / 0 - -6 in them, and feed through filter to remove unwanted data
+var cleanFingerprint = function(yearImg) {
   yearImg = ee.Image(yearImg);
-  var warmBinary = yearImg.select("warmFingerprint").gte(numVarThreshold);
-  var coldBinary = yearImg.select("coldFingerprint").lte(numVarThreshold.multiply(ee.Number(-1)));
-  return((warmBinary.addBands(coldBinary)).copyProperties(yearImg));
+  var warmMask = yearImg.select("warmFingerprint").gte(numVarThreshold);
+  var coldMask = yearImg.select("coldFingerprint").lte(numVarThreshold.multiply(ee.Number(-1)));
+  var cleanWarm = yearImg.select("warmFingerprint").updateMask(warmMask);
+  var cleanCold = yearImg.select("coldFingerprint").updateMask(coldMask);
+  return(cleanWarm.addBands(cleanCold));
 };
 
+//Create 'clean' fingerprints
+var cleanFAvg = fingerprintAvg.map(cleanFingerprint);
+var cleanFMax = fingerprintMax.map(cleanFingerprint);
+var cleanFMin = fingerprintMin.map(cleanFingerprint);
 
-var binaryFMax = fingerprintMax.map(binaryFingerprint);
-Map.addLayer(ee.Image(binaryFMax.get(62)).select("warmFingerprint"), {min: 0, max: 1, palette:['blue', 'red']}, 'warmFingerprintBinary', true);
+//Print one of the fingerprints for one year!
+Map.addLayer(ee.Image(cleanFAvg.get(62)).select("warmFingerprint"), {min: 0, max: 6, palette:['blue', 'red']}, 'warmFingerprintClean2020', false);
 
-//Turn lists of images into imagecollections
-binaryFMax = ee.ImageCollection.fromImages(binaryFMax);
+// Turn lists of images into imagecollections
+var ICcleanFAvg = ee.ImageCollection.fromImages(cleanFAvg);
+var ICcleanFMax = ee.ImageCollection.fromImages(cleanFMax);
+var ICcleanFMin = ee.ImageCollection.fromImages(cleanFMin);
+
+
+//Quick test comparison to TerraClimate raw PDSI values
+
+var yr = ee.Number(1990);
+var summerPDSI = terraclimate.select('pdsi').
+  filter(ee.Filter.calendarRange(7,8,'month')).
+  filter(ee.Filter.calendarRange(yr,yr,'year')).
+  mean();
+var summerPDSImask = summerPDSI.lte(-400);
+summerPDSI = summerPDSI.updateMask(summerPDSImask);
+Map.addLayer(ee.Image(summerPDSI), {min: -500, max: 0, palette:['orange', 'blue']}, 'PDSI summer 1990', false);
 
 
 ///////////////////////////////////////////////////////////////////
 /////////////////////// VISUALIZE OUTPUT //////////////////////////
 ///////////////////////////////////////////////////////////////////
 
-var warmViz = ee.ImageCollection(binaryFMax.select('warmFingerprint'));
-var videoArgs = {
-  dimensions: 768,
-//  region: domain,
-  framesPerSecond: 3,
-  min: 0,
-  max: 1,
-  palette: ['blue', 'red']
-};
+// var warmViz = ee.ImageCollection(binaryFMax.select('warmFingerprint'));
 
-print(warmViz.getVideoThumbURL(videoArgs));
+// //Args for video
+// var videoArgs = {
+//   dimensions: 768,
+// //  region: colorado,
+//   region: west,
+//   framesPerSecond: 3,
+//   min: 0,
+//   max: 1,
+//   palette: ['blue', 'red']
+// };
 
+// //Args for filmstrip
+// var filmArgs = {
+//   dimensions: 128,
+//   region: conus,
+//   min: 0,
+//   max: 1,
+//   palette: ['blue', 'red']
+// };
 
-
-
-
+// print(warmViz.getVideoThumbURL(videoArgs));
+// print(warmViz.getFilmstripThumbURL(filmArgs));
 
 
 
@@ -525,12 +563,11 @@ var buffPts = pts.map(bufferPoints(15, true));
 //print("Points:", buffPts);
 
 //Display data & points to ensure correct. Check a few values by hand
-//Appears that raw anomalies are exactly correct. Z-scores are very close but a bit off?...
 var testyr = 7;
 //print('Anoms to take from', allanomsraw.get(0));
 //Map.addLayer(ee.Image(ee.List(allanomsraw.get(5)).get(testyr - 1)), {min:0,max:500, palette:['blue', 'red']}, 'raw', false);
 //Map.addLayer(ee.Image(ee.List(standardizeAll.get(5)).get(testyr - 1)), {min:0,max:500, palette:['blue', 'red']}, 'z-score', false);
-Map.addLayer(buffPts, {}, 'pts', true);
+//Map.addLayer(buffPts, {}, 'pts', true);
 
 //print('Year is ', ee.Image(ee.List(allanomsraw.get(5)).get(testyr - 1)).get('year'));
 //print('Band is ', ee.Image(ee.List(allanomsraw.get(5)).get(testyr - 1)).bandNames());
@@ -597,386 +634,3 @@ Export.table.toDrive({
 
 
 
-
-
-
-                          /////////////////////////////////////////////////////////////////////////
-                          ///////////////////////////////// CODE STORAGE //////////////////////////
-                          /////////////////////////////////////////////////////////////////////////
-
-// ///////////////////////////////////////////////////////////////////////////////
-// //FUNCTION TO GET ANOMALIES WITH AN IMAGE FOR EACH YEAR, VARIABLES ARE BANDS //
-// ///////////////////////////////////////////////////////////////////////////////
-// var getanomaliesforyear = function(year) {
-//   var getanomsforvariable = function(variable) {
-//     //Set parameters related to the working variable
-//     variable = ee.String(variable);
-//     var varlen = variable.length(); //Length of variable name, for band names
-//     var dir = ee.String(direction_dictionary.get(variable)); //Get direction of variable from dictionary
-//     var varname = ee.String(ee.Algorithms.If(dir.equals('positive'), variable.cat("_mean_max"), variable.cat("_mean_min"))); //set name of min/max band from min/max analysis to use based on direction & variable
-//     var monthname = ee.String(ee.Algorithms.If(dir.equals('positive'), variable.cat("_mean_month_max"), variable.cat("_mean_month_min"))); //set name of min/max month band from min/max analysis to use based on direction & variable
-      
-//     //calculate anomaly for one month
-//     var getanomaly_onemonth = function(month) {
-//       var dats = ee.Image(vars.filter(ee.Filter.calendarRange(year, year, 'year'))
-//         .filter(ee.Filter.calendarRange(month, month, 'month'))
-//         .select(variable)
-//         .toList(1).get(0)); //Turn into single image by getting from list, note that index starts at 0
-//       var anom = allminmax.select(monthname);
-//       anom = anom.remap([month], [1]); //Map month of interest to "1" i.e. true. Default value left as null, so non-remapped pixels will be masked out
-//       //CALCULATE ANOMALY: (data from month for variable - average for month over time frame)*1 IF min/max is month in question
-//       anom = anom.multiply(dats.select(variable).subtract(allminmax.select(varname))); 
-//       return anom;
-//     };
-    
-//     //Map anomaly calculator for one month over all months
-//     var monthanomseparate = months.map(getanomaly_onemonth);
-    
-//     //Combine all outputs from mapping over list into a single blended image
-//     var yearanomcombined = ee.Image(monthanomseparate.get(0))
-//       .blend(ee.Image(monthanomseparate.get(1)))
-//       .blend(ee.Image(monthanomseparate.get(2)))
-//       .blend(ee.Image(monthanomseparate.get(3)))
-//       .blend(ee.Image(monthanomseparate.get(4)))
-//       .blend(ee.Image(monthanomseparate.get(5)))
-//       .blend(ee.Image(monthanomseparate.get(6)))
-//       .blend(ee.Image(monthanomseparate.get(7)))
-//       .blend(ee.Image(monthanomseparate.get(8)))
-//       .blend(ee.Image(monthanomseparate.get(9)))
-//       .blend(ee.Image(monthanomseparate.get(10)))
-//       .blend(ee.Image(monthanomseparate.get(11)));
-//     //Rename the image band to something that makes sense
-//     var yrstring = ee.Number(year).format('%04d'); //Zero-fill year to length of 4 numbers, ensure clean names
-//     yearanomcombined = yearanomcombined.rename([variable.cat(yrstring)]);
-//     return(yearanomcombined);
-//   };
-//   //Map getanomsforvariable over variable names
-//   var allvaranoms = ee.ImageCollection.fromImages(variable_names.map(getanomsforvariable)); //Create image collection with anomalies for all variables for one year
-//   allvaranoms = allvaranoms.toBands(); //Turn into a single image
-  
-//   allvaranoms = allvaranoms.rename(allvaranoms.bandNames().map(function(bandname) { //Clean up band names of the combined image
-//     return ee.String(bandname).slice(2); //system index numbers are auto-added to front after using toBands(). Slice from back using length of variable name. Note needs to be ee.Number since in mapped function
-//   }));
-//   allvaranoms = allvaranoms.set('year', year);
-//   return allvaranoms;
-// };
-
-// /////////Map function to get anomalies for all variables over all years of interest
-// var allanoms = ee.ImageCollection.fromImages(years.map(getanomaliesforyear)); //Create image collection from the list returned
-// print("all anoms fixed", allanoms);
-
-
-
-
-// //////////////////////////////////////////////
-// // This is functional for a single variable //
-// //////////////////////////////////////////////
-
-
-// //List of years to map over
-// var years = ee.List.sequence(1958, 2021);
-
-// //List of months to map over
-// var months = ee.List.sequence(1, 12);
-
-
-// var variable = ee.String('tmmx');
-// var varlen = variable.length();
-// var dir = ee.String(direction_dictionary.get(variable)); //Get direction of variable from dictionary
-// var varname = ee.String(ee.Algorithms.If(dir.equals('positive'), variable.cat("_mean_max"), variable.cat("_mean_min"))); //set name of min/max band to use based on direction & variable
-// var monthname = ee.String(ee.Algorithms.If(dir.equals('positive'), variable.cat("_mean_month_max"), variable.cat("_mean_month_min"))); //set name of min/max month band to use based on direction & variable
-
-
-// //Function to get anomaly for one year, one variable
-// var getanomaly_oneyear = function(year) {
-  
-//   //calculate anomaly for one month
-//   var getanomaly_onemonth = function(month) {
-//     var dats = ee.Image(vars.filter(ee.Filter.calendarRange(year, year, 'year'))
-//       .filter(ee.Filter.calendarRange(month, month, 'month'))
-//       .select(variable)
-//       .toList(1).get(0)); //Turn into single image by getting from list, note that index starts at 0
-//     var anom = allminmax.select(monthname);
-//     anom = anom.remap([month], [1]); //Map month of interest to "1" i.e. true. Default value left as null, so non-remapped pixels will be masked out
-//     //CALCULATE ANOMALY: (data from month for variable - average for month over time frame)*1 IF min/max is month in question
-//     anom = anom.multiply(dats.select(variable).subtract(allminmax.select(varname))); 
-//     return anom;
-//   };
-  
-//   //Map anomaly calculator for one month over all months
-//   var monthanomseparate = months.map(getanomaly_onemonth);
-  
-//   //Combine all outputs from mapping over list into a single blended image
-//   var yearanomcombined = ee.Image(monthanomseparate.get(0))
-//     .blend(ee.Image(monthanomseparate.get(1)))
-//     .blend(ee.Image(monthanomseparate.get(2)))
-//     .blend(ee.Image(monthanomseparate.get(3)))
-//     .blend(ee.Image(monthanomseparate.get(4)))
-//     .blend(ee.Image(monthanomseparate.get(5)))
-//     .blend(ee.Image(monthanomseparate.get(6)))
-//     .blend(ee.Image(monthanomseparate.get(7)))
-//     .blend(ee.Image(monthanomseparate.get(8)))
-//     .blend(ee.Image(monthanomseparate.get(9)))
-//     .blend(ee.Image(monthanomseparate.get(10)))
-//     .blend(ee.Image(monthanomseparate.get(11)));
-//   //Rename the image band to something that makes sense
-//   var yrstring = ee.Number(year).format('%04d'); //Zero-fill year to length of 4 numbers, ensure clean names
-//   yearanomcombined = yearanomcombined.rename([variable.cat(yrstring)]);
-//   return(yearanomcombined);
-// };
-
-// //Map getanomaly_oneyear over entire image collection & clean up result
-// var yearanoms = ee.ImageCollection.fromImages(years.map(getanomaly_oneyear)); //Create image collection with anomalies for one variable for all years
-// yearanoms = yearanoms.toBands(); //Turn into a single image
-// yearanoms = yearanoms.rename(yearanoms.bandNames().map(function(bandname) { //Clean up band names of the combined image
-//   return ee.String(bandname).slice(ee.Number(-4).subtract(varlen)); //system index numbers are auto-added to front after using toBands(). Slice from back using length of variable name. Note needs to be ee.Number since in mapped function
-// }));
-
-// print(yearanoms);
-
-
-// Map.addLayer(yearanoms.select("tmmx2020"), {min: 1, max: 12, palette:['blue', 'red']}, 'anomtest2020', false);
-
-
-// //////////////// MIN/MAX/MONTHS
-// //Create imagecollections for each variable of interest, with an image for each year containing two bands:
-// // 1) the minimum or maximum of the variable that occurred at that location during the given year, and 2) the month of that value's occurrence
-
-// //List of years to map over
-// var years = ee.List.sequence(1958, 2021);
-
-// //Function to create a min reducer that retains band names & values for all other bands
-// function argminReduce(imageCollection) {
-//   var bandNames = imageCollection.first().bandNames();
-//   return imageCollection.reduce(
-//     ee.Reducer.min(bandNames.size())
-//       .setOutputs(bandNames)
-//   );
-// }
-
-// //Function to create a max reducer that retains band names & values for all other bands
-// function argmaxReduce(imageCollection) {
-//   var bandNames = imageCollection.first().bandNames();
-//   return imageCollection.reduce(
-//     ee.Reducer.max(bandNames.size())
-//       .setOutputs(bandNames)
-//   );
-// }
-
-// //Function to add the image month as a band called 'month'
-// function addmonthband(image) {
-//   var monthVal = image.date().get('month');
-//   return image.addBands(ee.Image.constant(monthVal).toInt().rename('month'));
-// }
-
-// //Functions to get negative variable minimums and month of those minimums, rename appropriately
-// var getprecipmin = function(year) {
-//   var workingyear = vars.select('pr').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var minimums = argminReduce(workingyear.map(addmonthband));
-//   minimums = minimums.rename(['pr_min', 'pr_month']);
-//   minimums = minimums.set('year', ee.Number(year).toInt()); //set 'year' property here, which is carried over to all others when bands are added in combine function
-//   return minimums;
-// };
-
-// var getpdsimin = function(year) {
-//   var workingyear = vars.select('pdsi').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var minimums = argminReduce(workingyear.map(addmonthband));
-//   minimums = minimums.rename(['pdsi_min', 'pdsi_month']);
-//   return minimums;
-// };
-// var getsoilmin = function(year) {
-//   var workingyear = vars.select('soil').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var minimums = argminReduce(workingyear.map(addmonthband));
-//   minimums = minimums.rename(['soil_min', 'soil_month']);
-//   return minimums;
-// };
-
-// // Functions to get positive variable maximums and month of those maximums, rename appropriately
-// var gettempmax = function(year) {
-//   var workingyear = vars.select('tmmx').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var maximums = argmaxReduce(workingyear.map(addmonthband));
-//   maximums = maximums.rename(['tmmx_max', 'tmmx_month']);
-//   return maximums;
-// };
-// var getvpdmax = function(year) {
-//   var workingyear = vars.select('vpd').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var maximums = argmaxReduce(workingyear.map(addmonthband));
-//   maximums = maximums.rename(['vpd_max', 'vpd_month']);
-//   return maximums;
-// };
-// var getdeficitmax = function(year) {
-//   var workingyear = vars.select('def').filter(ee.Filter.calendarRange(year, year, 'year'));
-//   var maximums = argmaxReduce(workingyear.map(addmonthband));
-//   maximums = maximums.rename(['def_max', 'def_month']);
-//   return maximums;
-// };
-
-// //Run functions
-// var precipmins = years.map(getprecipmin);
-// var pdsimins = years.map(getpdsimin);
-// var soilmins = years.map(getsoilmin);
-// var tempmaxs = years.map(gettempmax);
-// var vpdmaxs = years.map(getvpdmax);
-// var deficitmaxs = years.map(getdeficitmax);
-
-// ////////////// COMBINE
-// //Combine all into a single image collection
-
-// //List of list image numbers to map over
-// var imageNums = ee.List.sequence(0, 63);
-
-// //Function to combine all variable bands into single images & clip to domain of interest
-// var combine = function(imageNum) {
-//   var combined = ee.Image(precipmins.get(imageNum));
-//   combined = combined
-//     .addBands(ee.Image(pdsimins.get(imageNum)))
-//     .addBands(soilmins.get(imageNum))
-//     .addBands(tempmaxs.get(imageNum))
-//     .addBands(vpdmaxs.get(imageNum))
-//     .addBands(deficitmaxs.get(imageNum));
-//   return combined.clip(domain);
-// }; 
-
-// //Run function, print output, visualize sample to check
-// var allvariables = ee.ImageCollection.fromImages(imageNums.map(combine));
-// print('All variable relevant min/max & month of occurence:', allvariables);
-// Map.addLayer(allvariables.filter(ee.Filter.eq('year', 1958)).select('tmmx_month'), {min: 0, max: 12, palette:['blue', 'red']}, 'tmmx-month', false);
-
-
-
-// ////////////// EXPORT
-// // Export all images of interest using batch download from fitoprincipe repo: https://github.com/fitoprincipe/geetools-code-editor
-// // To auto-run all tasks directly in GEE console, can follow instructions at bottom of this blog:
-// // https://benny.istan.to/blog/20220319-batch-task-execution-in-google-earth-engine-code-editor
-// // which utilizes code from https://github.com/kongdd/gee_monkey
-
-// //Export monthly means images
-// var batch = require('users/fitoprincipe/geetools:batch');
-// batch.Download.ImageCollection.toDrive(monthmeans, foldername,
-//   {region: domain,
-//   name: 'MonthlyMeans_Month{monthclean}',
-//   scale: 4638.3
-//   });
-
-// //Export all variable images
-// var batch = require('users/fitoprincipe/geetools:batch');
-// batch.Download.ImageCollection.toDrive(allvariables, foldername,
-//   {region: domain,
-//   name: 'AllVariables_{year}',
-//   scale: 4638.3
-//   });
-
-
-// ///////////// PULL ALL VALUES FOR A TEST POINT TO CALCULATE ANOMALY BY HAND & COMPARE TO OUTPUT CALCULATION FROM R
-
-// //// Functions from GEE developers page: https://developers.google.com/earth-engine/tutorials/community/extract-raster-values-for-points
-// //Function to buffer points
-// function bufferPoints(radius, bounds) {
-//   return function(pt) {
-//     pt = ee.Feature(pt);
-//     return bounds ? pt.buffer(radius).bounds() : pt.buffer(radius);
-//   };
-// }
-// //Calculate zonal statistics. This function requires an imagecollection!
-// function zonalStats(ic, fc, params) {
-//   // Initialize internal params dictionary.
-//   var _params = {
-//     reducer: ee.Reducer.mean(),
-//     scale: null,
-//     crs: null,
-//     bands: null,
-//     bandsRename: null,
-//     imgProps: null,
-//     imgPropsRename: null,
-//     datetimeName: 'datetime',
-//     datetimeFormat: 'YYYY-MM-dd HH:mm:ss'
-//   };
-
-//   // Replace initialized params with provided params.
-//   if (params) {
-//     for (var param in params) {
-//       _params[param] = params[param] || _params[param];
-//     }
-//   }
-
-//   // Set default parameters based on an image representative.
-//   var imgRep = ic.first();
-//   var nonSystemImgProps = ee.Feature(null)
-//     .copyProperties(imgRep).propertyNames();
-//   if (!_params.bands) _params.bands = imgRep.bandNames();
-//   if (!_params.bandsRename) _params.bandsRename = _params.bands;
-//   if (!_params.imgProps) _params.imgProps = nonSystemImgProps;
-//   if (!_params.imgPropsRename) _params.imgPropsRename = _params.imgProps;
-
-//   // Map the reduceRegions function over the image collection.
-//   var results = ic.map(function(img) {
-//     // Select bands (optionally rename), set a datetime & timestamp property.
-//     img = ee.Image(img.select(_params.bands, _params.bandsRename))
-//       .set(_params.datetimeName, img.date().format(_params.datetimeFormat))
-//       .set('timestamp', img.get('system:time_start'));
-
-//     // Define final image property dictionary to set in output features.
-//     var propsFrom = ee.List(_params.imgProps)
-//       .cat(ee.List([_params.datetimeName, 'timestamp']));
-//     var propsTo = ee.List(_params.imgPropsRename)
-//       .cat(ee.List([_params.datetimeName, 'timestamp']));
-//     var imgProps = img.toDictionary(propsFrom).rename(propsFrom, propsTo);
-
-//     // Subset points that intersect the given image.
-//     var fcSub = fc.filterBounds(img.geometry());
-
-//     // Reduce the image by regions.
-//     return img.reduceRegions({
-//       collection: fcSub,
-//       reducer: _params.reducer,
-//       scale: _params.scale,
-//       crs: _params.crs
-//     })
-//     // Add metadata to each feature.
-//     .map(function(f) {
-//       return f.set(imgProps);
-//     });
-//   }).flatten().filter(ee.Filter.notNull(_params.bandsRename));
-
-//   return results;
-// }
-
-// //Create feature collection from points
-// var pts = ee.FeatureCollection([
-//   ee.Feature(ee.Geometry.Point([-105.24249040058604,40.00981039217258]), {plot_id: "BoulderCO"}), //Boulder, CO, SEEC
-//   ee.Feature(ee.Geometry.Point([-110.786763, 43.432451]), {plot_id: "JacksonWY"}), //Jackson WY, Rafter J
-//   ee.Feature(ee.Geometry.Point([-122.486757, 48.733972]), {plot_id: "BellinghamWA"}), //Bellingham, WA, WWU
-//   ee.Feature(ee.Geometry.Point([-122.170020, 37.428193]), {plot_id: "StanfordCA"}), //Stanford, CA
-// ]);
-
-
-// //Buffer points by 15m radius to create areas for zonal stats
-// var buffPts = pts.map(bufferPoints(15, true));
-// print("Points:", buffPts);
-
-// //Display dataset to ensure correct
-// Map.addLayer(vars.filter(ee.Filter.calendarRange(1,1,'month'))
-//   .filter(ee.Filter.calendarRange(1958,1958,'year'))
-//   .select('tmmx'), {min: -100, max: 500, palette:['blue', 'red']}, 'temp', false);
-// Map.addLayer(buffPts);
-
-
-// //Set params for zonalStats
-// var params = {
-//   scale: 30,
-//   bands: ['tmmx', 'vpd', 'def', 'soil', 'pr', 'pdsi'],
-//   datetimeName: 'month',
-//   datetimeFormat: 'YYYYMM'
-// };
-
-// //Run zonalStats function
-// var ptsStats = zonalStats(vars, buffPts, params);
-// print(ptsStats);
-
-// //Export results
-// Export.table.toDrive({
-//   collection: ptsStats,
-//   folder: foldername,
-//   description: 'locations_pull_raw_terra_data',
-//   fileFormat: 'CSV'
-// });
