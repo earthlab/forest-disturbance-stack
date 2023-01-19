@@ -3,8 +3,9 @@
 library(pbapply)
 library(terra)
 library(dplyr)
+library(here)
 
-dir.create("data/raw/landfire-disturbance/", recursive = TRUE, showWarnings = FALSE)
+dir.create("data/raw/landfire-disturbance/conus", showWarnings = FALSE, recursive = TRUE)
 
 landfire_dl_urls <- c("https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-US_DIST1999.zip&TYPE=landfire",
                       "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-US_DIST2000.zip&TYPE=landfire",
@@ -26,37 +27,22 @@ landfire_dl_urls <- c("https://landfire.gov/bulk/downloadfile.php?FNAME=US_Distu
                       "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2016_Dist_200_CONUS.zip&TYPE=landfire",
                       "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2017_Dist_220_CONUS.zip&TYPE=landfire",
                       "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2018_Dist_220_CONUS.zip&TYPE=landfire",
-                      "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2019_Dist_220_CONUS.zip&TYPE=landfire")
+                      "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2019_Dist_220_CONUS.zip&TYPE=landfire",
+                      "https://landfire.gov/bulk/downloadfile.php?FNAME=US_Disturbance-LF2020_Dist_220_CONUS.zip&TYPE=landfire")
 
-destfiles <- file.path("data", "raw", "landfire-disturbance", paste0("landfire_", 1999:2019, ".zip"))
+years <- 1999:2020
+destfiles <- here::here("data", "raw", "landfire-disturbance", "conus", paste0("landfire-disturbance_conus_", years, ".zip"))
 
-mapply(FUN = function(url, destfile) {download.file(url = url, 
-                                                    destfile = destfile)},
-       url = landfire_dl_urls, 
-       destfile = destfiles)
+zips_dl <- list.files(path = here::here("data", "raw", "landfire-disturbance", "conus"), pattern = ".zip", full.names = TRUE)
 
-mapply(FUN = function(destfile, exdir) {unzip(zipfile = destfile, exdir = exdir)},
-       destfile = destfiles, 
-       exdir = gsub(pattern = ".zip", replacement = "", x = destfiles))
-
-# Find all the geoTIFF files (use the $ to signify "end of line" in the matching,
-# otherwise you get files that end in .tif.vat.db or .tif.ovr as well)
-tifs <- 
-  list.files(file.path("data", "raw", "landfire-disturbance"), 
-             pattern = ".tif$", 
-             recursive = TRUE,
-             full.names = TRUE)
-
-csvs <- 
-  list.files(file.path("data", "raw", "landfire-disturbance"), 
-             pattern = ".csv$", 
-             recursive = TRUE,
-             full.names = TRUE)
-
-# spat_metadata <- 
-#   list.files(file.path("data", "raw", "landfire-disturbance"), 
-#              pattern = ".shp$", 
-#              recursive = TRUE,
-#              full.names = TRUE)
-
-
+if(!all(zips_dl %in% destfiles)) {
+  mapply(FUN = function(url, destfile) {download.file(url = url, 
+                                                      destfile = destfile,
+                                                      mode = "wb")},
+         url = landfire_dl_urls, 
+         destfile = destfiles)
+  
+  mapply(FUN = function(destfile, exdir) {unzip(zipfile = destfile, exdir = exdir)},
+         destfile = destfiles, 
+         exdir = gsub(pattern = ".zip", replacement = "", x = destfiles))
+}
