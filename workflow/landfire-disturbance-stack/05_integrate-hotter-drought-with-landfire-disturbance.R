@@ -65,22 +65,22 @@ for (i in seq_along(years)) {
 fnames <- sort(list.files(here::here("data", "out", "forest-disturbance-stack", "western-conus"), full.names = TRUE))
 lyr_names <- stringr::str_sub(fnames, start = -8, end = -5)
 
-lapply(fnames, FUN = function(x) {
-  
-  year <- stringr::str_sub(x, start = -8, end = -5)
-  
-  out_fname <- 
-  # simple effort of "multiple layer input to single layer output" to create the new categories
-  # as defined above in the RAT
-  # Write to disk at the same time, and ensure that the data type is as lightweight as possible
-  out <- terra::subst(x = s, 
-                      from = as.matrix(rat[, c("hd", "lf")]), 
-                      to = rat$new_val, 
-                      filename = out_fname,
-                      datatype = "INT1U",
-                      overwrite = TRUE)
-  
-})
+# lapply(fnames, FUN = function(x) {
+#   
+#   year <- stringr::str_sub(x, start = -8, end = -5)
+#   
+#   out_fname <- 
+#   # simple effort of "multiple layer input to single layer output" to create the new categories
+#   # as defined above in the RAT
+#   # Write to disk at the same time, and ensure that the data type is as lightweight as possible
+#   out <- terra::subst(x = s, 
+#                       from = as.matrix(rat[, c("hd", "lf")]), 
+#                       to = rat$new_val, 
+#                       filename = out_fname,
+#                       datatype = "INT1U",
+#                       overwrite = TRUE)
+#   
+# })
 
 
 
