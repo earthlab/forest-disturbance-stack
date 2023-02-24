@@ -31,12 +31,17 @@ vignettes/*.pdf
 *_cache/
 /cache/
 
-data/*
-.DS_Store
-
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
 
 # R Environment Variables
 .Renviron
+
+# User-created files/directories to ignore
+data/*
+.DS_Store
+figs/*
+docs/*
+
+incubator/*
