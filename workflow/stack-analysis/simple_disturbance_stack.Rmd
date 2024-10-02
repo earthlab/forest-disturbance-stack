@@ -1,0 +1,326 @@
+A script to take in the raw disturbance stack and create simplified versions of it:
+1) Ignore 4 & 5 hot-drought thresholds
+2) Fire only
+3) Insect only
+
+Tyler L. McIntosh
+CU Boulder CIRES Earth Lab
+Last updated: 10/25/23
+
+This script uses the following naming conventions wherever possible:
+ lowerCamelCase for variables
+ period.separated for functions
+ underscore_separated for files
+ 
+```{r, echo = FALSE, warning = FALSE, results = FALSE, message = FALSE}
+# SETUP ----
+## Libraries ----
+
+#Check the required libraries and download if needed
+list.of.packages <- c("tidyverse", #Includes ggplot2, dplyr, tidyr, readr, purrr, tibble, stringr, forcats
+                      "terra", #New raster data package, documentation pdf here: https://cran.r-project.org/web/packages/terra/terra.pdf
+                      "sf", #New vector data package
+                      "mapview", #For quick interactive mapping
+                      "here", #Relative path best practices
+                      "landscapemetrics",  #Fragstats for R
+                      "future", "future.apply", "furrr", "doFuture", "progressr", #Futureverse! https://www.futureverse.org/packages-overview.html; https://henrikbengtsson.github.io/course-stanford-futureverse-2023/
+                      "here", #relative path best practice
+                      "tictoc") #time running of processes: tic("Name process")...toc()
+
+#Install all packages that aren't installed yet
+install.packages(setdiff(list.of.packages, rownames(installed.packages())))
+
+#Load all packages
+invisible(lapply(list.of.packages, library, character.only = TRUE)) #use 'invisible' to prevent output being displayed
+
+
+## Clean workspace & set up environment ----
+rm(list=ls()) #Ensure empty workspace if running from beginning
+here::here() #Check here location
+here::i_am("workflow/stack-analysis/simple_disturbance_stack.Rmd")
+#OR
+#setwd() #Set working directory directly
+options(digits = 6) #Set standard decimal print output
+options(scipen = 999) #Turn scientific notation on and off (0 = on, 999 = off)
+```
+
+Set up directories and CRS
+
+```{r}
+
+## Set data directory
+dataDir <- here::here("data")
+
+## Set output directory & create if doesn't already exist --
+outDir <- here::here("data", "derived")
+
+# check if sub directory exists 
+if (!dir.exists(outDir)){
+  dir.create(here::here("data", "derived"))
+}
+
+#Set CRS
+chosenCRS <- 'EPSG:5070'
+
+#Set EPA L3 aoi (if set to NA, will operate on full stack)
+aoiNm <- NA #"Southern Rockies"
+
+
+```
+
+
+Manage AOI
+
+```{r}
+
+if(!is.na(aoiNm)) {
+
+#Load data for aoi
+aoiL3 <- sf::st_read(here::here('data', 'aoi',  'NA_CEC_Eco_Level3.shp')) 
+
+#Filter & merge to single vector
+aoi <- aoiL3 %>%
+  dplyr::filter(NA_L3NAME == aoiNm) %>%
+  dplyr::group_by(NA_L3NAME) %>%
+  dplyr::summarize(geometry = st_union(geometry)) 
+}
+
+```
+
+Load disturbance data stack, clip and mask to AOI if relevant
+
+```{r}
+
+#Load disturbance stack & fix names
+distStackFileNames <- list.files(here("data", "data_stack_forest_western_conus", "western-conus", "western-conus"),
+                                   pattern = "*.tif$", full.names = TRUE)
+distStack <- rast(distStackFileNames)
+  
+  
+#Function to create disturbance layer names
+re.name.stack <- function(dStack, dNamesRoot) {
+  dNums <- as.character(seq(1999, 2020))
+  dNames <- paste(dNamesRoot, dNums, sep="_")
+  names(dStack) <- dNames
+  return(dStack)
+}
+
+distStack <- distStack |> re.name.stack("forestDisturbance")
+
+
+#Function to clip a raster to a vector, ensuring in same projection
+#Returns raster in original projection, but clipped and masked to vector
+careful.clip <- function(raster, vector) {
+    if (sf::st_crs(vector) != terra::crs(raster)) { #if raster and vector aren't in same projection, change vector to match
+      print("Projecting vector")
+      vector <- sf::st_transform(vector, terra::crs(raster)) 
+    } else {
+      print("Vector already in raster CRS")
+    }
+    print("Clipping")
+    r <- terra::crop(raster,
+                     vector,
+                     mask = TRUE) #crop & mask
+    return(r)
+}
+  
+
+#Clip & mask if AOI is set
+if(!is.na(aoiNm)) {
+  #Run function
+  dStackAoi <- careful.clip(raster = distStack,
+                                        vector = aoi)
+  datatype(dStackAoi)
+  writeNm <- paste0("dist_stack_", gsub(" ", "_", aoiNm), ".tif")
+  terra::writeRaster(dStackAoi,
+                     here::here(outDir, writeNm),
+                     overwrite = TRUE,
+                     datatype = 'INT1U')
+
+} else if(is.na(aoiNm)) {
+  dStackAoi <- distStack
+}
+
+if(is.na(aoiNm)) {
+  aoiNm <- "west"
+}
+
+
+```
+
+Original data stack codes are:
+Value - landfire disturbance - hotter-drought
+0 - none - no hotter-drought/fewer than 4 thresholds exceeded
+1 - fire - no hotter-drought/fewer than 4 thresholds exceeded
+2 - insect/disease - no hotter-drought/fewer than 4 thresholds exceeded
+3 - other Landfire disturbance - no hotter-drought/fewer than 4 thresholds exceeded
+4 - none - hotter-drought with 4 thresholds exceeded
+5 - fire - hotter-drought with 4 thresholds exceeded
+6 - insects/disease - hotter-drought with 4 thresholds exceeded
+7 - other Landfire disturbance - hotter-drought with 4 thresholds exceeded
+8 - none - hotter-drought with 5 thresholds exceeded
+9 - fire - hotter-drought with 5 thresholds exceeded
+10 - insects/disease - hotter-drought with 5 thresholds exceeded
+11 - other Landfire disturbance - hotter-drought with 5 thresholds exceeded
+12 - none - hotter-drought with 6 thresholds exceeded
+13 - fire - hotter-drought with 6 thresholds exceeded
+14 - insects/disease - hotter-drought with 6 thresholds exceeded
+15 - other Landfire disturbance - hotter-drought with 6 thresholds exceeded
+
+
+
+# Write out as combined raster
+
+```{r}
+terra::writeRaster(distStack,
+                   here::here(outDir, "disturbance-stack-west.tif"),
+                   overwrite = TRUE,
+                   datatype = "INT1U",
+                   gdal=c("COMPRESS=DEFLATE"))
+
+
+```
+
+
+
+Perform data stack simplification #1: Ignore 4 & 5-threshold hotter drought as well as "other" landfire disturbance
+
+``` {r}
+
+## Set new codes ----
+oldCodes <- seq(0, 15)
+newCodes <- c(0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0, 3, 4, 5, 3)
+# 0 - None
+# 1 - Fire
+# 2 - Insect/Disease
+# 3 - Hot Drought
+# 4 - Fire + Hot Drought
+# 5 - Insect/Disease + Hot Drought
+
+codes <- cbind(oldCodes, newCodes)
+
+
+## Re-classify ----
+
+#Classify to new codes
+classifier <- matrix(codes, ncol=2, byrow=FALSE) #Two-column matrix can be used to classify integer values in a from -> to format
+
+
+#Full stack
+dStackAoiSimple <- dStackAoi %>% future.apply::future_lapply(FUN = function(x) {terra::classify(x, classifier)}) %>% rast()
+dStackAoiSimple <- dStackAoiSimple |> re.name.stack("simple_disturbance")
+
+
+
+#Write stack
+writeNm <- paste0("simple_dist_stack_", gsub(" ", "_", aoiNm), ".tif")
+
+terra::writeRaster(dStackAoiSimple,
+                   here::here(outDir, writeNm),
+                   overwrite = TRUE,
+                   datatype = "INT1U")
+
+```
+
+
+Perform data stack simplification #2: Fire only
+
+``` {r}
+
+## Set new codes ----
+oldCodes <- seq(0, 15)
+newCodes <- c(0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0)
+# 0 - None
+# 1 - Fire
+
+
+codes <- cbind(oldCodes, newCodes)
+
+
+## Re-classify ----
+
+#Classify to new codes
+classifier <- matrix(codes, ncol=2, byrow=FALSE) #Two-column matrix can be used to classify integer values in a from -> to format
+
+dStackAoiFireOnly <- dStackAoi %>% 
+  future.apply::future_lapply(FUN = function(x) {terra::classify(x, classifier)}) %>% 
+  terra::rast()
+dStackAoiFireOnly <- dStackAoiFireOnly |> re.name.stack("fire_disturbance")
+
+#Write stack
+writeNm <- paste0("fire_dist_stack_", gsub(" ", "_", aoiNm), ".tif")
+
+terra::writeRaster(dStackAoiFireOnly,
+                   here::here(outDir, writeNm),
+                   overwrite = TRUE,
+                   datatype = "INT1U")
+
+
+```
+
+Perform data stack simplification #3: Insect only
+
+``` {r}
+
+## Set new codes ----
+oldCodes <- seq(0, 15)
+newCodes <- c(0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0)
+# 0 - None
+# 1 - Insect/Disease
+
+codes <- cbind(oldCodes, newCodes)
+
+
+## Re-classify ----
+
+#Classify to new codes
+classifier <- matrix(codes, ncol=2, byrow=FALSE) #Two-column matrix can be used to classify integer values in a from -> to format
+
+dStackAoiInsectOnly <- dStackAoi %>% 
+  future.apply::future_lapply(FUN = function(x) {terra::classify(x, classifier)}) %>% 
+  terra::rast()
+dStackAoiInsectOnly <- dStackAoiInsectOnly |> re.name.stack("insect_disturbance")
+
+#Write stack
+writeNm <- paste0("insect_dist_stack_", gsub(" ", "_", aoiNm), ".tif")
+
+terra::writeRaster(dStackAoiInsectOnly,
+                   here::here(outDir, writeNm),
+                   overwrite = TRUE,
+                   datatype = "INT1U")
+
+```
+
+Perform data stack simplification #4: Drought only
+
+``` {r}
+
+## Set new codes ----
+oldCodes <- seq(0, 15)
+newCodes <- c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1)
+# 0 - None
+# 1 - Drought
+
+codes <- cbind(oldCodes, newCodes)
+
+
+## Re-classify ----
+
+#Classify to new codes
+classifier <- matrix(codes, ncol=2, byrow=FALSE) #Two-column matrix can be used to classify integer values in a from -> to format
+
+dStackAoiDroughtOnly <- dStackAoi %>% 
+  future.apply::future_lapply(FUN = function(x) {terra::classify(x, classifier)}) %>% 
+  terra::rast()
+dStackAoiDroughtOnly <- dStackAoiDroughtOnly |> re.name.stack("drought_disturbance")
+
+#Write stack
+writeNm <- paste0("drought_dist_stack_", gsub(" ", "_", aoiNm), ".tif")
+
+terra::writeRaster(dStackAoiDroughtOnly,
+                   here::here(outDir, writeNm),
+                   overwrite = TRUE,
+                   datatype = "INT1U")
+
+```
+

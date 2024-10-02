@@ -1,0 +1,414 @@
+Run basic spatial statistics on disturbance stack
+
+Tyler L. McIntosh
+CU Boulder CIRES Earth Lab
+Last updated: 9/14/23
+
+This script uses the following naming conventions wherever possible:
+ lowerCamelCase for variables
+ period.separated for functions
+ underscore_separated for files
+
+```{r, echo = FALSE, warning = FALSE}
+# SETUP ----
+## Libraries ----
+
+#Check the required libraries and download if needed
+list.of.packages <- c("tidyverse", "terra", "sf", "mapview", "here", "landscapemetrics", "tictoc")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+#Load
+library(tidyverse) #Tidyverse!
+library(terra) #New raster data package, documentation pdf here: https://cran.r-project.org/web/packages/terra/terra.pdf
+library(sf) #New vector data package
+library(mapview) #For quick interactive mapping
+library(here) #Relative path best practices
+library(landscapemetrics) #Fragstats for R
+library(tictoc) #time running of processes
+
+## Clean workspace & set up environment ----
+rm(list=ls()) #Ensure empty workspace if running from beginning
+here() #Check here location
+#OR
+#setwd() #Set working directory directly
+options(digits = 2) #Set standard decimal print output
+options(scipen = 999) #Turn scientific notation on and off (0 = on, 999 = off)
+```
+
+```{r, echo = FALSE}
+#Load data
+
+fireInsects <- terra::rast("/home/rstudio/fromNathan/fire_and_insects.tif")
+
+#aoi <- sf::st_read(here::here('data', 'aoi', 'na_cec_eco_l2', 'NA_CEC_Eco_Level2.shp'))
+aoi <- sf::st_read(here::here('/home/rstudio/raw/aoi/NA_CEC_Eco_Level3.shp')) %>% sf::st_transform(crs(fireInsects))
+
+aoiL4 <- sf::st_read(here::here('/home/rstudio/raw/aoi/us_eco_l4/us_eco_l4_no_st.shp')) %>% sf::st_transform(crs(fireInsects))
+  
+
+
+```
+
+
+```{r}
+plot(fireInsects)
+plot(aoi, add = TRUE, col = NA, border = "red")
+
+
+```
+
+```{r}
+aoiInterest <- aoi %>% filter(NA_L3NAME == "Sierra Nevada" | 
+                                NA_L3NAME == "Middle Rockies" | 
+                                NA_L3NAME == "Idaho Batholith" | 
+                                NA_L3NAME == "Southern Rockies") %>%
+  group_by(NA_L3NAME) %>%
+  summarize(geometry = st_union(geometry)) %>%
+  mutate(name = NA_L3NAME)
+
+#mapview(aoiInterest)
+
+aoiL4Interest <- aoiL4 %>%
+  filter(NA_L3NAME == "Sierra Nevada" | 
+                                NA_L3NAME == "Middle Rockies" | 
+                                NA_L3NAME == "Idaho Batholith" | 
+                                NA_L3NAME == "Southern Rockies") %>%
+  group_by(US_L4NAME) %>%
+  summarize(geometry = st_union(geometry)) %>%
+  mutate(name = US_L4NAME)
+
+#mapview(aoiL4Interest)
+
+
+
+```
+
+```{r}
+#Function to clip a raster to a vector, ensuring in same projection
+#Returns raster in original projection, but clipped and masked to vector
+careful.clip <- function(raster, vector) {
+  if (sf::st_crs(vector) != terra::crs(raster)) { #if raster and vector aren't in same projection, change vector to match
+    print("Projecting vector")
+    vector <- sf::st_transform(vector, terra::crs(raster)) 
+  } else {
+    print("Vector already in raster CRS")
+  }
+  print("Clipping")
+  r <- terra::crop(raster,
+                   vector,
+                   mask = TRUE) #crop & mask
+  return(r)
+}
+
+#Function to clip a raster to a set of polygons (one clip per polygon in set),
+#ensuring they are in the same projection
+#vectors should have a 'name' field
+#Returns the set of rasters as a named list 
+careful.clip.set <- function(raster, vectors) {
+  out <- list()
+  nms <- c()
+  for(i in 1:nrow(vectors)) {
+    vec <- vectors[i,]
+    clipped <- careful.clip(raster, vec)
+    out[[vec$name]] <- clipped
+  }
+  return(out)
+}
+
+fireInsectInterestList <- careful.clip.set(fireInsects, aoiL4Interest)
+#fireInsectInterestList <- careful.clip.set(fireInsects, aoiInterest)
+
+
+
+```
+
+Now, for each raster in the list, visualize
+
+
+```{r}
+
+numLand <- length(fireInsectInterestList)
+
+if(numLand %% 2 == 0) {
+  nrow <- numLand %/% 2
+} else {
+  nrow <- (numLand %/% 2) + 1
+}
+ncol <- 2
+par(mfrow = c(nrow, ncol))
+
+# Loop through the raster list and plot each raster
+for (name in names(fireInsectInterestList)) {
+  plot(fireInsectInterestList[[name]], main = name)
+}
+
+# Reset the plotting layout
+par(mfrow = c(1, 1))
+
+title('Fire+Insect')
+
+
+```
+Run some basic spatial stats
+
+For name in fireInsectInterestList
+
+
+
+```{r}
+
+#t <- fireInsectInterestList$`Idaho Batholith`
+
+
+
+# check_landscape(t)
+# tic()
+# classMetrics <- calculate_lsm(t,
+#               what = c('lsm_c_ca', #overall area of class
+#                        'lsm_c_np', #number of patches
+#                        'lsm_c_area_mn', #patch area mean
+#                        'lsm_c_area_sd', 
+#                        'lsm_c_core_mn', #patch core area mean
+#                        'lsm_c_core_sd',
+#                        'lsm_c_ed', #patch area-weighted edge density
+#                        'lsm_c_shape_mn', #patch shape index mean - better than para (perim-area ratio), standardized
+#                        'lsm_c_contig_mn', #patch contiguity index mean
+#                        'lsm_c_cohesion'), #aggregation of patches
+#               directions = 8,
+#               progress = TRUE)
+# toc()
+# 
+# metrics <- calculate_lsm(t, what = "patch")
+# show_correlation(metrics, method = "pearson")
+# 
+# medArea <- metrics %>% filter(metric == "area")
+# median(medArea$value)
+# 
+# ggplot(medArea) +
+#   geom_histogram(aes(x = value))
+# 
+# ggplot(medArea) +
+#   geom_histogram(aes(x = value)) +
+#   xlim(0, 1000) +
+#   ylim(0, 500)
+# 
+# 
+# 
+# patchM <- list()
+# classM <- list()
+# 
+# for(i in 1:length(fireInsectInterestList)) {
+#   r <- fireInsectInterestList[[i]]
+#   r[r == 0] <- NA #change 0s to NA for raster calcs
+#   
+#   #Calculate class metrics
+#   print("Calculating class metrics")
+#   classMetrics <- calculate_lsm(r,
+#               what = c('lsm_c_ca', #overall area of class
+#                        'lsm_c_np', #number of patches
+#                        'lsm_c_area_mn'),
+#               directions = 8,
+#               progress = TRUE)
+#   
+#   #Calculate patch metrics
+#   print("Calculating class metrics")
+#   patchMetrics <- calculate_lsm(r, what = "patch")
+#   
+#   patchM[[i]] <- patchMetrics
+#   classM[[i]] <- classMetrics
+#   names(patchM)[[i]] <- names(fireInsectInterestList)[[i]]
+#   names(classM)[[i]] <- names(fireInsectInterestList)[[i]]
+#   gc()
+# }
+
+
+
+```
+
+
+```{r}
+
+
+# t <- fireInsectInterestList[[2]] #small
+# t2 <- fireInsectInterestList[[9]] #small
+# t3 <- fireInsectInterestList[[11]] #Southern forested, big landscape
+# t4 <- fireInsectInterestList[[6]] #small area, many component polygons
+# 
+# tList <- list(fireInsectInterestList$`Eastern Batholith`, fireInsectInterestList$`Lochsa-Selway-Clearwater Canyons`)
+# names(tList) <- c("Eastern Batholith", "Lochsa-Selway-Clearwater Canyons")
+
+calc.class.metrics <- function(xLandscape) {
+  classMetrics <- calculate_lsm(xLandscape,
+              what = c(
+                       'lsm_c_ed', #patch area-weighted edge density
+                       'lsm_c_ai',
+                       'lsm_c_clumpy',
+                       'lsm_c_cpland',
+                       'lsm_c_dcad',
+                       'lsm_c_division',
+                       'lsm_c_lpi',
+                       'lsm_c_lsi',
+                       'lsm_c_mesh',
+                       'lsm_c_np',
+                       'lsm_c_pafrac',
+                       'lsm_c_tca',
+                       'lsm_c_cohesion'), #aggregation of patches
+              directions = 8,
+              progress = TRUE)
+  print(paste("Class Metrics Done"))
+  gc()
+  return(classMetrics)
+}
+
+calc.patch.metrics <- function(xLandscape) {
+  patchMetrics <- calculate_lsm(xLandscape, what = "patch")
+  print("Patch Metrics Done")
+  gc()
+  return(patchMetrics)
+}
+
+#metrics <- fireInsectInterestListClean %>% lapply(calc.metrics)
+
+# tic()
+# tt <- calc.class.metrics(t) #22 seconds
+# toc()
+# 
+# tic()
+# t2t <- calc.class.metrics(t2) #28
+# toc()
+# 
+# 
+# tic()
+# ttPatch <- calc.patch.metrics(t) #86 seconds
+# toc()
+# 
+# tic()
+# ttc2 <- calc.class.metrics2(t) #160 seconds
+# toc()
+# 
+# tic()
+# tClass <- tList %>% lapply(calc.class.metrics) #50 seconds
+# toc()
+# 
+# tic()
+# tClass2 <- tList %>% lapply(calc.class.metrics) #66 sec
+# toc()
+# 
+# tic()
+# tPatch <- tList %>% lapply(calc.patch.metrics) #92 sec
+# toc()
+# 
+# tic()
+# t3t <- calc.class.metrics(t3) #161
+# toc()
+# 
+# tic()
+# t4t <- calc.class.metrics(t4) #145
+# toc()
+
+
+
+
+l4Class <- list()
+for(i in 1:length(fireInsectInterestList)) {
+  land <- fireInsectInterestList[[i]]
+  cl <- check_landscape(land)
+  print(paste(cl))
+  classM <- calc.class.metrics(land)
+  l4Class[[i]] <- classM
+}
+
+
+
+check.landscape <- function(x) {
+  cl <- check_landscape(x)
+  print(paste(cl))
+}
+
+lapply(fireInsectInterestList, check.landscape)
+
+
+#check_landscape(fireInsectInterestList[[2]])
+
+# idahoClass <- fireInsectInterestList %>% lapply(calc.class.metrics)
+# idahoPatch <- fireInsectInterestList %>% lapply(calc.patch.metrics)
+
+#l4Class <- fireInsectInterestList %>% lapply(calc.class.metrics)
+#l4Patch <- fireInsectInterestList %>% lapply(calc.patch.metrics)
+
+
+
+
+t <- fireInsectInterestList[1:2]
+
+tt <- t %>% lapply(calc.class.metrics)
+
+for(i in 1:length(idahoClass)) {
+  nm <- names(idahoClass)[i]
+  idahoClass[[i]] <- idahoClass[[i]] %>% mutate(region = nm)
+  idahoPatch[[i]] <- idahoPatch[[i]] %>% mutate(region = nm)
+}
+
+classStats <- bind_rows(idahoClass) %>%
+  filter(class == 1) %>%
+  dplyr::left_join(y = lsm_abbreviations_names,
+                   by = c("metric", "level"))
+
+patchStats <- bind_rows(idahoPatch) %>%
+  filter(class == 1) %>%
+  dplyr::left_join(y = lsm_abbreviations_names,
+                   by = c("metric", "level"))
+
+
+
+
+```
+
+
+plot the metrics:
+-merge the outputs into one dataframe for each metric set
+-bar plot of 
+
+AREA
+
+NUMBER OF PATCHES
+
+PATCH AREA MEAN & MEDIAN
+
+PATCH CORE AREA
+
+ED: Area-weighted edge density. The metric describes the configuration of the
+landscape, e.g. because an aggregation of the same class will result in a low edge density. The metric is standardized to the total landscape area, and therefore comparisons among landscapes with different total areas are possible. Increases from 0, ED=0 if only one patch
+
+SHAPE: Shape metric. Equals SHAPE_MN = 0 if all patches are squares. Increases, without limit, as the shapes of patches become more complex. (better than perimiter-area ratios)
+
+CONTIG: Shape metric. Equals the mean of the contiguity index on class level for all patches.  Asses the spatial connectedness (contiguity) of cells in patches. Ranges from 0 to 1
+
+COHESION: COHESION is an ’Aggregation metric’. It characterises the connectedness of patches belonging to
+class i. It can be used to asses if patches of the same class are located aggregated or rather isolated
+and thereby COHESION gives information about the configuration of the landscape. Approaches COHESION = 0 if patches of class i become more isolated. Increases
+if patches of class i become more aggregated.
+
+
+
+```{r}
+
+
+ggplot(patchStats, aes(x = region, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~name, scales = "free") +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=2, color="red", fill="red")
+
+
+ggplot(classStats) +
+  geom_col(aes(x = region, y = value)) +
+  facet_wrap(~name, scales = "free")
+
+# show_correlation(patchStats %>% filter(region == "Eastern Batholith") %>% select(-region), method = "pearson")
+# 
+# 
+# show_correlation(patchStats %>% filter(region == "Lochsa-Selway-Clearwater Canyons") %>% select(-region), method = "pearson")
+
+
+```
