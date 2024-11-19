@@ -24,15 +24,13 @@ csvs <-
 
 relevant_tifs <-
   tibble::tibble(tif = tifs,
-                 year = substr(x = gsub(pattern = here::here("data", "raw", "landfire-disturbance", "conus"), replacement = "", x = tif),
-                               start = 23, stop = 26)) %>% 
+                 year = years) %>% 
   dplyr::select(year, tif)
 
 # CSV files are the raster attribute tables
 relevant_csvs <-
   tibble::tibble(csv = csvs,
-                 year = substr(x = gsub(pattern = here::here("data", "raw", "landfire-disturbance", "conus"), replacement = "", x = csv),
-                               start = 23, stop = 26)) %>% 
+                 year = years) %>% 
   dplyr::select(year, csv)
 
 # put all relevant files together in the same data frame
@@ -71,7 +69,7 @@ for(i in 1:nrow(relevant_files)) {
   
   file.copy(from = relevant_files$tif[i], to = relevant_files$tmp_path[i])
   tmp <- terra::rast(relevant_files$tmp_path[i])
-  terra::extend(x = tmp, y = new_ext, filename = relevant_files$out_path[i])
+  terra::extend(x = tmp, y = new_ext, filename = relevant_files$out_path[i], overwrite = TRUE)
   unlink(x = relevant_files$tmp_path[i])
   
 }
@@ -79,27 +77,57 @@ for(i in 1:nrow(relevant_files)) {
 (difftime(end, start, units = "mins"))
 
 # Make the raster attribute tables per year easier to use
-rat <- lapply(seq_along(relevant_files$year),
-              FUN = function(i) {
-                
-                rat_year <-
-                  read.csv(file = relevant_files$csv[i]) %>%
-                  dplyr::rename_with(.fn = tolower) %>%
-                  dplyr::rename_with(.fn = ~"year", .cols = tidyselect::contains("year")) %>%
-                  dplyr::rename_with(.fn = ~"description", .cols = tidyselect::contains("descriptio")) %>%
-                  dplyr::rename_with(.fn = ~"type_confidence", .cols = tidyselect::contains("type_confi")) %>%
-                  dplyr::rename_with(.fn = ~"sev_confidence", .cols = tidyselect::contains("sev_confi")) %>%
-                  dplyr::mutate(year_check = relevant_files$year[i])
-                
-                return(rat_year)
-              }) %>%
-  data.table::rbindlist(fill = TRUE) %>%
-  dplyr::mutate(red = ifelse(red > 1, yes = r / 256, no = red),
-                green = ifelse(green > 1, yes = g / 256, no = green),
-                blue = ifelse(blue > 1, yes = b / 256, no = blue)) %>%
-  dplyr::mutate(year = year_check) %>% # The 2008 data have the year recorded as 2009
-  dplyr::select(-year_check) %>%
-  dplyr::mutate(dplyr::across(.cols = tidyselect::where(fn = is.character), .fns = function(x) return(ifelse(x %in% c("NA", "", "N/A"), yes = NA, no = x))))
+# rat <- lapply(seq_along(relevant_files$year),
+#               FUN = function(i) {
+#                 
+#                 rat_year <-
+#                   read.csv(file = relevant_files$csv[i]) %>%
+#                   dplyr::rename_with(.fn = tolower) %>%
+#                   dplyr::rename_with(.fn = ~"year", .cols = tidyselect::contains("year")) %>%
+#                   dplyr::rename_with(.fn = ~"description", .cols = tidyselect::contains("descriptio")) %>%
+#                   dplyr::rename_with(.fn = ~"type_confidence", .cols = tidyselect::contains("type_confi")) %>%
+#                   dplyr::rename_with(.fn = ~"sev_confidence", .cols = tidyselect::contains("sev_confi")) %>%
+#                   dplyr::mutate(year_check = relevant_files$year[i])
+#                 
+#                 return(rat_year)
+#               }) %>%
+#   data.table::rbindlist(fill = TRUE) %>%
+#   dplyr::mutate(red = ifelse(red > 1, yes = r / 256, no = red),
+#                 green = ifelse(green > 1, yes = g / 256, no = green),
+#                 blue = ifelse(blue > 1, yes = b / 256, no = blue)) %>%
+#   dplyr::mutate(year = year_check) %>% # The 2008 data have the year recorded as 2009
+#   dplyr::select(-year_check) %>%
+#   dplyr::mutate(dplyr::across(.cols = tidyselect::where(fn = is.character), .fns = function(x) return(ifelse(x %in% c("NA", "", "N/A"), yes = NA, no = x))))
+
+
+
+process_rat <- function(file) {
+  df <- read.csv(file = file)
+  df <- df |>
+    dplyr::rename_with(.fn = tolower) |>
+    dplyr::rename_with(.fn = ~"year", .cols = tidyselect::contains("year")) |>
+    dplyr::rename_with(.fn = ~"description", .cols = tidyselect::contains("descriptio"))
+  if(any(grepl("type_confi", names(df), ignore.case = TRUE))) {
+    df <- df |> dplyr::rename_with(.fn = ~"type_confidence", .cols = tidyselect::contains("type_confi"))
+  }
+  if(any(grepl("sev_confi", names(df), ignore.case = TRUE))) {
+    df <- df |> dplyr::rename_with(.fn = ~"sev_confidence", .cols = tidyselect::contains("sev_confi"))
+  }
+  if(any(grepl("^Confidence", names(df), ignore.case = TRUE))) {
+    df <- df |> dplyr::rename_with(.fn = ~"type_confidence", .cols = tidyselect::starts_with("Confidence"))
+  }
+  return(df)
+}
+
+rat <- purrr::map(.x = relevant_csvs$csv,
+                  .f = process_rat) |>
+  data.table::rbindlist(fill = TRUE, use.names = TRUE) |>
+  dplyr::mutate(
+    red = ifelse(red > 1, r / 256, red),
+    green = ifelse(green > 1, g / 256, green),
+    blue = ifelse(blue > 1, b / 256, blue),
+  ) %>%
+  dplyr::mutate(across(where(is.character), ~ifelse(. %in% c("NA", "", "N/A"), NA, .)))
 
 write.csv(x = rat, file = here::here("data", "out", "landfire-disturbance", "raster-attribute-table_landfire-disturbance_conus.csv"), row.names = FALSE)
 

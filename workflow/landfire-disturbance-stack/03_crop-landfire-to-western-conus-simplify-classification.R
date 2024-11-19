@@ -1,6 +1,7 @@
 library(dplyr)
 library(terra)
-library(USAboundaries)
+#library(USAboundaries) - not available for newer versions of R
+library(tigris)
 library(here)
 
 dir.create("data/out/landfire-disturbance/western-conus", showWarnings = FALSE, recursive = TRUE)
@@ -74,8 +75,11 @@ new_dist_sev_table_simple <-
   dplyr::select(new_val, new_cat, new_dist_type, new_sev_type, new_sev_name) %>% 
   data.table::as.data.table()
 
+western_states <- c("WA", "OR", "CA", "ID", "NV", "MT", "WY", "UT", "CO", "AZ", "NM")
+
 western_conus <- 
-  USAboundaries::us_states(resolution = "high", states = c("California", "Washington", "Oregon", "Nevada", "Idaho", "Montana", "Arizona", "New Mexico", "Colorado", "Utah", "Wyoming")) %>% 
+  tigris::states(cb = FALSE) |>
+  dplyr::filter(STUSPS %in% western_states) |>
   sf::st_transform(sf::st_crs(terra::rast(relevant_files$out_path[1]))) %>% 
   sf::st_geometry() %>% 
   terra::vect()
