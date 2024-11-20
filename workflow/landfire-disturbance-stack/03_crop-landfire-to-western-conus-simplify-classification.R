@@ -112,8 +112,7 @@ for (i in 1:nrow(relevant_files)) {
 (difftime(end, start, units = "mins"))
 
 if(cyverse) {
-  system("cp -r ~/lens-aop-continental-scaling/data ~/data-store/data/iplant/home/shared/earthlab/macrosystems/lens-aop-continental-scaling")
-  system("cp -r ~/lens-aop-continental-scaling/figs ~/data-store/data/iplant/home/shared/earthlab/macrosystems/lens-aop-continental-scaling")
+  system("cp -r ~/forest-disturbance-stack/data ~/data-store/data/iplant/home/shared/earthlab/macrosystems/disturbance-stack")
 }
 
 
