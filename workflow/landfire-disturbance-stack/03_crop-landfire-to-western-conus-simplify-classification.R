@@ -4,6 +4,8 @@ library(terra)
 library(tigris)
 library(here)
 
+cyverse = TRUE
+
 dir.create("data/out/landfire-disturbance/western-conus", showWarnings = FALSE, recursive = TRUE)
 
 relevant_files <- read.csv(here::here("data", "out", "landfire-disturbance", "file-directory_landfire-disturbance_conus.csv"))
@@ -108,4 +110,10 @@ for (i in 1:nrow(relevant_files)) {
 }
 (end <- Sys.time())
 (difftime(end, start, units = "mins"))
+
+if(cyverse) {
+  system("cp -r ~/lens-aop-continental-scaling/data ~/data-store/data/iplant/home/shared/earthlab/macrosystems/lens-aop-continental-scaling")
+  system("cp -r ~/lens-aop-continental-scaling/figs ~/data-store/data/iplant/home/shared/earthlab/macrosystems/lens-aop-continental-scaling")
+}
+
 
