@@ -2,6 +2,7 @@
 // Script by Mike Koontz, Earth Lab
 // Export Hotter Drought for integration into offline disturbance stack
 
+
 var exportFolder = "GEE_Exports";
 
 var drought1999 = ee.Image("projects/cires-gg-earthlab/HotterDrought/HotterDrought_1999"),
@@ -36,8 +37,9 @@ print(template.projection());
 print(terraclim.first().projection());
 
 var export_proj = template.projection();
-var export_region = template.geometry();
+var export_region = template.geometry().buffer(10000);
 print(export_region);
+Map.addLayer(export_region);
 
 // var western_conus =
 // ee.Feature(
