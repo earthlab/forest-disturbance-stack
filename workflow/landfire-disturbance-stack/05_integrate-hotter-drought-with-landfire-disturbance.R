@@ -38,19 +38,6 @@ rat <-
 rat
 years <- 1999:2020
 
-xx <- terra::rast(list.files(path = here::here("data", "out", "landfire-disturbance", "western-conus"), pattern = "landfire", full.names = TRUE))
-x <- terra::rast(here::here("data", "out", "landfire-disturbance", "western-conus", paste0("landfire-disturbance_western-conus_", years[1], ".tif")))
-y <- terra::rast(here::here("data", "out", "landfire-disturbance", "western-conus", paste0("landfire-disturbance_western-conus_", years[17], ".tif")))
-z <- terra::rast(here::here("data", "out", "hotter-drought", "western-conus", paste0("hammond-hotter-drought_", years[5], ".tif")))
-zz <- z |> terra::crop(xx)
-c <- tigris::states()
-
-ext(x)
-ext(z)
-library(mapview)
-library(sf)
-
-
 for (i in seq_along(years)) {
   # Read target year's landfire data
   lf <- terra::rast(here::here("data", "out", "landfire-disturbance", "western-conus", paste0("landfire-disturbance_western-conus_", years[i], ".tif")))
