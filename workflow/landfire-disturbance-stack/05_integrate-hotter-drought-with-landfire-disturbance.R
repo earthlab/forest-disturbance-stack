@@ -2,6 +2,8 @@ library(dplyr)
 library(terra)
 library(here)
 
+cyverse <- TRUE
+
 dir.create(here::here("data", "ard", "western-conus"), showWarnings = FALSE, recursive = TRUE)
 dir.create(here::here("data", "out", "forest-disturbance-stack", "western-conus"), showWarnings = FALSE, recursive = TRUE)
 
@@ -61,3 +63,9 @@ for (i in seq_along(years)) {
                       datatype = "INT1U",
                       overwrite = TRUE)
 }
+
+if(cyverse) {
+  system("cp -r ~/forest-disturbance-stack/data/out/forest-disturbance-stack ~/data-store/data/iplant/home/shared/earthlab/macrosystems/disturbance-stack/data/out/")
+}
+
+
